@@ -15,7 +15,9 @@ Modern AI coding agents use "skills" — markdown files (typically `SKILL.md`) t
 - `~/.cursor/skills/`
 - `~/.codeium/windsurf/skills/`
 
-Managing the same skills across all these locations is tedious and error-prone. Skills get duplicated, go out of sync, or are forgotten entirely.
+Every installed skill is loaded into the system context as frontmatter on **every request**, consuming tokens whether the skill is relevant or not. With dozens of skills installed, this adds up fast — burning through context windows and increasing cost per interaction.
+
+On top of that, managing the same skills across all these locations is tedious and error-prone. Skills get duplicated, go out of sync, or are forgotten entirely.
 
 ## The Solution
 
