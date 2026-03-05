@@ -63,7 +63,9 @@ fn run_app(
                 match app.screen {
                     Screen::Import => handle_import_keys(app, key.code),
                     Screen::Main => {
-                        if app.searching {
+                        if app.delete_confirm.is_some() {
+                            handle_delete_keys(app, key.code);
+                        } else if app.searching {
                             handle_search_keys(app, key.code, key.modifiers);
                         } else {
                             handle_main_keys(app, key.code);
@@ -138,6 +140,9 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
             app.config.save();
             skills::sync_symlinks(&app.config);
         }
+        KeyCode::Char('x') => {
+            app.request_delete();
+        }
         KeyCode::Char('d') => {
             // Deactivate all
             for skill in &mut app.skills {
@@ -150,6 +155,14 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
             app.config.save();
             skills::sync_symlinks(&app.config);
         }
+        _ => {}
+    }
+}
+
+fn handle_delete_keys(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Char('y') => app.confirm_delete(),
+        KeyCode::Char('n') | KeyCode::Esc => app.cancel_delete(),
         _ => {}
     }
 }

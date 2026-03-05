@@ -413,6 +413,33 @@ pub fn sync_symlinks(config: &Config) {
     }
 }
 
+/// Delete a skill entirely: remove from central store, symlinks, and config.
+pub fn delete_skill(name: &str, config: &mut Config) {
+    let store = Config::central_store();
+    let store_path = store.join(name);
+
+    // Remove symlinks from all target dirs
+    for target_dir in config.expanded_target_dirs() {
+        let link_path = target_dir.join(name);
+        if link_path.symlink_metadata().is_ok() {
+            if link_path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+                let _ = fs::remove_file(&link_path);
+            } else {
+                let _ = fs::remove_dir_all(&link_path);
+            }
+        }
+    }
+
+    // Remove from central store
+    if store_path.exists() {
+        let _ = fs::remove_dir_all(&store_path);
+    }
+
+    // Remove from config
+    config.skills.remove(name);
+    config.save();
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

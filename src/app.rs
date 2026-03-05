@@ -1,3 +1,5 @@
+use ratatui::widgets::ListState;
+
 use crate::config::Config;
 use crate::skills::{self, Skill, UnmanagedSkill};
 
@@ -17,6 +19,7 @@ pub struct App {
     pub config: Config,
     pub skills: Vec<Skill>,
     pub selected: usize,
+    pub list_state: ListState,
     pub search_query: String,
     pub searching: bool,
     pub running: bool,
@@ -25,21 +28,28 @@ pub struct App {
     // Import state
     pub unmanaged: Vec<UnmanagedSkill>,
     pub import_confirm: ImportConfirm,
+
+    // Delete confirmation
+    pub delete_confirm: Option<String>,
 }
 
 impl App {
     pub fn new(config: Config) -> Self {
         let skills = skills::load_managed_skills(&config);
+        let mut list_state = ListState::default();
+        list_state.select(Some(0));
         Self {
             config,
             skills,
             selected: 0,
+            list_state,
             search_query: String::new(),
             searching: false,
             running: true,
             screen: Screen::Main,
             unmanaged: Vec::new(),
             import_confirm: ImportConfirm::Yes,
+            delete_confirm: None,
         }
     }
 
@@ -87,6 +97,7 @@ impl App {
     pub fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -94,6 +105,7 @@ impl App {
         let max = self.filtered_skills().len().saturating_sub(1);
         if self.selected < max {
             self.selected = max.min(self.selected + 1);
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -118,6 +130,7 @@ impl App {
         self.searching = true;
         self.search_query.clear();
         self.selected = 0;
+        self.list_state.select(Some(0));
     }
 
     pub fn end_search(&mut self) {
@@ -127,15 +140,40 @@ impl App {
     pub fn clear_search(&mut self) {
         self.search_query.clear();
         self.selected = 0;
+        self.list_state.select(Some(0));
     }
 
     pub fn search_push(&mut self, c: char) {
         self.search_query.push(c);
         self.selected = 0;
+        self.list_state.select(Some(0));
     }
 
     pub fn search_pop(&mut self) {
         self.search_query.pop();
         self.selected = 0;
+        self.list_state.select(Some(0));
+    }
+
+    pub fn request_delete(&mut self) {
+        if let Some(skill) = self.selected_skill() {
+            self.delete_confirm = Some(skill.meta.name.clone());
+        }
+    }
+
+    pub fn confirm_delete(&mut self) {
+        if let Some(name) = self.delete_confirm.take() {
+            skills::delete_skill(&name, &mut self.config);
+            self.skills = skills::load_managed_skills(&self.config);
+            let max = self.skills.len().saturating_sub(1);
+            if self.selected > max {
+                self.selected = max;
+            }
+            self.list_state.select(Some(self.selected));
+        }
+    }
+
+    pub fn cancel_delete(&mut self) {
+        self.delete_confirm = None;
     }
 }

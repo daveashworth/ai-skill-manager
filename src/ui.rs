@@ -6,14 +6,14 @@ use ratatui::Frame;
 
 use crate::app::{App, ImportConfirm, Screen};
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::Import => draw_import(f, app),
         Screen::Main => draw_main(f, app),
     }
 }
 
-fn draw_import(f: &mut Frame, app: &App) {
+fn draw_import(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     // Center the dialog
@@ -114,7 +114,7 @@ fn draw_import(f: &mut Frame, app: &App) {
     f.render_widget(confirm, chunks[3]);
 }
 
-fn draw_main(f: &mut Frame, app: &App) {
+fn draw_main(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     let outer = Layout::default()
@@ -147,6 +147,49 @@ fn draw_main(f: &mut Frame, app: &App) {
     draw_skill_list(f, app, content[0]);
     draw_skill_detail(f, app, content[1]);
 
+    // Delete confirmation overlay
+    if let Some(ref name) = app.delete_confirm {
+        let dialog = centered_rect(50, 20, area);
+        f.render_widget(ratatui::widgets::Clear, dialog);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(1)])
+            .split(dialog);
+
+        let text = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Delete ", Style::default().fg(Color::Red)),
+                Span::styled(name.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled("?", Style::default().fg(Color::Red)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  This will remove it from the central store",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                "  and all target directories.",
+                Style::default().fg(Color::Gray),
+            )),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red))
+                .title(" Confirm Delete "),
+        );
+        f.render_widget(text, chunks[0]);
+
+        let confirm = Paragraph::new(Line::from(vec![
+            Span::styled("  [y]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
+            Span::styled("[n/Esc]", Style::default().fg(Color::Yellow)),
+            Span::styled(" Cancel", Style::default().fg(Color::Gray)),
+        ]));
+        f.render_widget(confirm, chunks[1]);
+    }
+
     // Footer
     let footer = if app.searching {
         Paragraph::new(Line::from(vec![
@@ -165,6 +208,8 @@ fn draw_main(f: &mut Frame, app: &App) {
             Span::styled(" Activate all  ", Style::default().fg(Color::Gray)),
             Span::styled("[d]", Style::default().fg(Color::Yellow)),
             Span::styled(" Deactivate all  ", Style::default().fg(Color::Gray)),
+            Span::styled("[x]", Style::default().fg(Color::Yellow)),
+            Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
             Span::styled("[q]", Style::default().fg(Color::Yellow)),
             Span::styled(" Quit", Style::default().fg(Color::Gray)),
         ];
@@ -177,17 +222,18 @@ fn draw_main(f: &mut Frame, app: &App) {
     f.render_widget(footer, outer[2]);
 }
 
-fn draw_skill_list(f: &mut Frame, app: &App, area: Rect) {
-    let filtered = app.filtered_skills();
+fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let selected = app.selected;
 
-    let items: Vec<ListItem> = filtered
+    let items: Vec<ListItem> = app
+        .filtered_skills()
         .iter()
         .enumerate()
         .map(|(i, (_, skill))| {
             let marker = if skill.active { "●" } else { "○" };
             let marker_color = if skill.active { Color::Green } else { Color::DarkGray };
 
-            let name_style = if i == app.selected {
+            let name_style = if i == selected {
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
@@ -205,11 +251,11 @@ fn draw_skill_list(f: &mut Frame, app: &App, area: Rect) {
 
             let line = Line::from(vec![
                 Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
-                Span::styled(&skill.meta.name, name_style),
+                Span::styled(skill.meta.name.clone(), name_style),
                 Span::styled(version, Style::default().fg(Color::DarkGray)),
             ]);
 
-            if i == app.selected {
+            if i == selected {
                 ListItem::new(line).style(Style::default().bg(Color::Rgb(30, 30, 50)))
             } else {
                 ListItem::new(line)
@@ -223,13 +269,15 @@ fn draw_skill_list(f: &mut Frame, app: &App, area: Rect) {
         format!(" Skills (filter: \"{}\") ", app.search_query)
     };
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
-            .title(title),
-    );
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .highlight_symbol("")
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+                .title(title),
+        );
+    f.render_stateful_widget(list, area, &mut app.list_state);
 }
 
 fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
