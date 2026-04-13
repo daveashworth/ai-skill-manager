@@ -114,13 +114,12 @@ impl App {
         if let Some(&(real_idx, _)) = filtered.get(self.selected) {
             self.skills[real_idx].active = !self.skills[real_idx].active;
 
-            let name = self.skills[real_idx].meta.name.clone();
+            let key = self.skills[real_idx].key.clone();
             let active = self.skills[real_idx].active;
 
-            self.config.skills.insert(
-                name,
-                crate::config::SkillState { active },
-            );
+            self.config
+                .skills
+                .insert(key, crate::config::SkillState { active });
             self.config.save();
             skills::sync_symlinks(&self.config);
         }
@@ -157,7 +156,7 @@ impl App {
 
     pub fn request_delete(&mut self) {
         if let Some(skill) = self.selected_skill() {
-            self.delete_confirm = Some(skill.meta.name.clone());
+            self.delete_confirm = Some(skill.key.clone());
         }
     }
 

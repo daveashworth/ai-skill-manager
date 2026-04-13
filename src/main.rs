@@ -19,7 +19,8 @@ use config::Config;
 
 fn main() -> io::Result<()> {
     // Load or create config
-    let config = Config::load();
+    let mut config = Config::load();
+    skills::normalize_skill_state_keys(&mut config);
     config.save(); // Ensure dirs exist
 
     // Ensure central store exists
@@ -51,10 +52,7 @@ fn main() -> io::Result<()> {
     result
 }
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     while app.running {
         terminal.draw(|f| ui::draw(f, app))?;
 
@@ -132,10 +130,9 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
             // Activate all
             for skill in &mut app.skills {
                 skill.active = true;
-                app.config.skills.insert(
-                    skill.meta.name.clone(),
-                    config::SkillState { active: true },
-                );
+                app.config
+                    .skills
+                    .insert(skill.key.clone(), config::SkillState { active: true });
             }
             app.config.save();
             skills::sync_symlinks(&app.config);
@@ -147,10 +144,9 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
             // Deactivate all
             for skill in &mut app.skills {
                 skill.active = false;
-                app.config.skills.insert(
-                    skill.meta.name.clone(),
-                    config::SkillState { active: false },
-                );
+                app.config
+                    .skills
+                    .insert(skill.key.clone(), config::SkillState { active: false });
             }
             app.config.save();
             skills::sync_symlinks(&app.config);
