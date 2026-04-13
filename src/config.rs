@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillState {
     pub active: bool,
 }
@@ -79,6 +79,7 @@ impl Default for Config {
                     "~/.agents/skills".to_string(),
                     "~/.config/amp/skills".to_string(),
                     "~/.cursor/skills".to_string(),
+                    "~/.codex/skills".to_string(),
                     "~/.codeium/windsurf/skills".to_string(),
                 ],
             },
@@ -86,5 +87,3 @@ impl Default for Config {
         }
     }
 }
-
-

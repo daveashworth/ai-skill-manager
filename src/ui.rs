@@ -21,8 +21,7 @@ fn draw_import(f: &mut Frame, app: &mut App) {
 
     // Clear background
     f.render_widget(
-        Block::default()
-            .style(Style::default().bg(Color::Black)),
+        Block::default().style(Style::default().bg(Color::Black)),
         area,
     );
 
@@ -38,8 +37,16 @@ fn draw_import(f: &mut Frame, app: &mut App) {
 
     // Title
     let title = Paragraph::new("  Unmanaged Skills Found")
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title(" Skill Manager "));
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Skill Manager "),
+        );
     f.render_widget(title, chunks[0]);
 
     // Skill list
@@ -48,7 +55,13 @@ fn draw_import(f: &mut Frame, app: &mut App) {
         .iter()
         .map(|s| {
             let source = if s.is_symlink {
-                format!(" (symlink → {})", s.symlink_target.as_ref().map(|p| p.display().to_string()).unwrap_or_default())
+                format!(
+                    " (symlink → {})",
+                    s.symlink_target
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default()
+                )
             } else {
                 format!(" (dir: {})", s.source_path.display())
             };
@@ -56,13 +69,22 @@ fn draw_import(f: &mut Frame, app: &mut App) {
                 String::new()
             } else {
                 let d = &s.meta.description;
-                let truncated = if d.len() > 60 { format!("{}…", &d[..60]) } else { d.clone() };
+                let truncated = if d.len() > 60 {
+                    format!("{}…", &d[..60])
+                } else {
+                    d.clone()
+                };
                 format!("  {}", truncated)
             };
             ListItem::new(vec![
                 Line::from(vec![
                     Span::styled("  • ", Style::default().fg(Color::Cyan)),
-                    Span::styled(&s.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &s.name,
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(source, Style::default().fg(Color::DarkGray)),
                 ]),
                 Line::from(Span::styled(desc, Style::default().fg(Color::Gray))),
@@ -70,15 +92,15 @@ fn draw_import(f: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(format!(
-            " {} skill(s) will be imported to central store ",
-            app.unmanaged.len()
-        )));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+        " {} skill(s) will be imported to central store ",
+        app.unmanaged.len()
+    )));
     f.render_widget(list, chunks[1]);
 
     // Description of what will happen
-    let action_text = vec![
+    let action_text =
+        vec![
         Line::from(vec![
             Span::styled("  Skills will be copied to ", Style::default().fg(Color::Gray)),
             Span::styled("~/.config/skillmanager/skills/", Style::default().fg(Color::Cyan)),
@@ -88,24 +110,34 @@ fn draw_import(f: &mut Frame, app: &mut App) {
             Style::default().fg(Color::Gray),
         )),
     ];
-    let action = Paragraph::new(action_text)
-        .block(Block::default().borders(Borders::ALL).title(" What happens next "));
+    let action = Paragraph::new(action_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" What happens next "),
+    );
     f.render_widget(action, chunks[2]);
 
     // Confirm buttons
     let yes_style = if app.import_confirm == ImportConfirm::Yes {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
     } else {
         Style::default().fg(Color::Gray)
     };
     let no_style = if app.import_confirm == ImportConfirm::No {
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
     } else {
         Style::default().fg(Color::Gray)
     };
 
     let confirm = Paragraph::new(Line::from(vec![
-        Span::styled("  Import and manage these skills?   ", Style::default().fg(Color::White)),
+        Span::styled(
+            "  Import and manage these skills?   ",
+            Style::default().fg(Color::White),
+        ),
         Span::styled(" Yes ", yes_style),
         Span::raw("  "),
         Span::styled(" No ", no_style),
@@ -130,9 +162,19 @@ fn draw_main(f: &mut Frame, app: &mut App) {
     let total = app.skills.len();
     let active_count = app.skills.iter().filter(|s| s.active).count();
     let title = Paragraph::new(Line::from(vec![
-        Span::styled(" Skill Manager", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::styled(
-            format!("  {} skills ({} active, {} inactive)", total, active_count, total - active_count),
+            " Skill Manager",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                "  {} skills ({} active, {} inactive)",
+                total,
+                active_count,
+                total - active_count
+            ),
             Style::default().fg(Color::DarkGray),
         ),
     ]));
@@ -149,6 +191,10 @@ fn draw_main(f: &mut Frame, app: &mut App) {
 
     // Delete confirmation overlay
     if let Some(ref name) = app.delete_confirm {
+        let display_name = app
+            .selected_skill()
+            .map(|skill| skill.meta.name.as_str())
+            .unwrap_or(name.as_str());
         let dialog = centered_rect(50, 20, area);
         f.render_widget(ratatui::widgets::Clear, dialog);
         let chunks = Layout::default()
@@ -160,7 +206,12 @@ fn draw_main(f: &mut Frame, app: &mut App) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Delete ", Style::default().fg(Color::Red)),
-                Span::styled(name.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    display_name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("?", Style::default().fg(Color::Red)),
             ]),
             Line::from(""),
@@ -182,7 +233,10 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         f.render_widget(text, chunks[0]);
 
         let confirm = Paragraph::new(Line::from(vec![
-            Span::styled("  [y]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  [y]",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
             Span::styled("[n/Esc]", Style::default().fg(Color::Yellow)),
             Span::styled(" Cancel", Style::default().fg(Color::Gray)),
@@ -196,7 +250,10 @@ fn draw_main(f: &mut Frame, app: &mut App) {
             Span::styled(" /", Style::default().fg(Color::Yellow)),
             Span::styled(&app.search_query, Style::default().fg(Color::White)),
             Span::styled("█", Style::default().fg(Color::Yellow)),
-            Span::styled("  [Enter] done  [Esc] cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "  [Enter] done  [Esc] cancel",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]))
     } else {
         let mut spans = vec![
@@ -215,7 +272,10 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         ];
         if !app.search_query.is_empty() {
             spans.push(Span::styled("  [Esc]", Style::default().fg(Color::Yellow)));
-            spans.push(Span::styled(" Clear filter", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled(
+                " Clear filter",
+                Style::default().fg(Color::Gray),
+            ));
         }
         Paragraph::new(Line::from(spans))
     };
@@ -231,7 +291,11 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
         .enumerate()
         .map(|(i, (_, skill))| {
             let marker = if skill.active { "●" } else { "○" };
-            let marker_color = if skill.active { Color::Green } else { Color::DarkGray };
+            let marker_color = if skill.active {
+                Color::Green
+            } else {
+                Color::DarkGray
+            };
 
             let name_style = if i == selected {
                 Style::default()
@@ -249,16 +313,28 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
                 format!(" {}", skill.meta.version)
             };
 
-            let line = Line::from(vec![
-                Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
-                Span::styled(skill.meta.name.clone(), name_style),
-                Span::styled(version, Style::default().fg(Color::DarkGray)),
-            ]);
+            let key_style = if i == selected {
+                Style::default().fg(Color::Rgb(170, 170, 210))
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
+                    Span::styled(skill.meta.name.clone(), name_style),
+                    Span::styled(version, Style::default().fg(Color::DarkGray)),
+                ]),
+                Line::from(vec![
+                    Span::styled("   key: ", key_style),
+                    Span::styled(skill.key.clone(), key_style),
+                ]),
+            ];
 
             if i == selected {
-                ListItem::new(line).style(Style::default().bg(Color::Rgb(30, 30, 50)))
+                ListItem::new(lines).style(Style::default().bg(Color::Rgb(30, 30, 50)))
             } else {
-                ListItem::new(line)
+                ListItem::new(lines)
             }
         })
         .collect();
@@ -269,14 +345,12 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
         format!(" Skills (filter: \"{}\") ", app.search_query)
     };
 
-    let list = List::new(items)
-        .highlight_symbol("")
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
-                .title(title),
-        );
+    let list = List::new(items).highlight_symbol("").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+            .title(title),
+    );
     f.render_stateful_widget(list, area, &mut app.list_state);
 }
 
@@ -295,17 +369,35 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let status = if skill.active { "Active" } else { "Inactive" };
-    let status_color = if skill.active { Color::Green } else { Color::DarkGray };
+    let status_color = if skill.active {
+        Color::Green
+    } else {
+        Color::DarkGray
+    };
 
     let mut lines = vec![
         Line::from(vec![
             Span::styled("  Status:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                status,
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Name:    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(&skill.meta.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &skill.meta.name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Key:     ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&skill.key, Style::default().fg(Color::Rgb(170, 170, 210))),
         ]),
     ];
 
@@ -336,7 +428,7 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
         let max_width = area.width.saturating_sub(6) as usize;
         for wrapped_line in word_wrap(&skill.meta.description, max_width) {
             lines.push(Line::from(Span::styled(
-                format!  ("  {}", wrapped_line),
+                format!("  {}", wrapped_line),
                 Style::default().fg(Color::White),
             )));
         }
@@ -351,14 +443,12 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
         ),
     ]));
 
-    let detail = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
-                .title(" Details "),
-        );
+    let detail = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+            .title(" Details "),
+    );
     f.render_widget(detail, area);
 }
 

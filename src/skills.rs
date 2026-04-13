@@ -14,6 +14,8 @@ pub struct SkillMeta {
 
 #[derive(Debug, Clone)]
 pub struct Skill {
+    /// Stable config key, derived from the central store directory name.
+    pub key: String,
     pub meta: SkillMeta,
     pub active: bool,
     /// Path inside central store
@@ -66,7 +68,10 @@ pub fn parse_frontmatter(path: &Path) -> Option<SkillMeta> {
         if is_indented && in_metadata && trimmed.contains(':') {
             let first_colon = trimmed.find(':').unwrap();
             let key = &trimmed[..first_colon];
-            let val = trimmed[first_colon + 1..].trim().trim_matches('\'').trim_matches('"');
+            let val = trimmed[first_colon + 1..]
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"');
             match key {
                 "author" => {
                     if author.is_empty() {
@@ -142,11 +147,7 @@ pub fn parse_frontmatter(path: &Path) -> Option<SkillMeta> {
 
     // Fall back to directory name if no name in frontmatter
     if name.is_empty() {
-        name = path
-            .parent()?
-            .file_name()?
-            .to_string_lossy()
-            .to_string();
+        name = path.parent()?.file_name()?.to_string_lossy().to_string();
     }
 
     Some(SkillMeta {
@@ -181,11 +182,7 @@ pub fn load_managed_skills(config: &Config) -> Vec<Skill> {
             continue;
         }
 
-        let dir_name = path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let dir_name = path.file_name().unwrap().to_string_lossy().to_string();
 
         let meta = parse_frontmatter(&skill_md).unwrap_or(SkillMeta {
             name: dir_name.clone(),
@@ -201,6 +198,7 @@ pub fn load_managed_skills(config: &Config) -> Vec<Skill> {
             .unwrap_or(false);
 
         skills.push(Skill {
+            key: dir_name,
             meta,
             active,
             store_path: path,
@@ -209,6 +207,56 @@ pub fn load_managed_skills(config: &Config) -> Vec<Skill> {
 
     skills.sort_by(|a, b| a.meta.name.cmp(&b.meta.name));
     skills
+}
+
+/// Repair old config entries that were keyed by frontmatter name instead of store dir.
+pub fn normalize_skill_state_keys(config: &mut Config) -> bool {
+    normalize_skill_state_keys_for_store(config, &Config::central_store())
+}
+
+fn normalize_skill_state_keys_for_store(config: &mut Config, store: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(store) else {
+        return false;
+    };
+
+    let managed_dirs: std::collections::HashSet<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut changed = false;
+
+    for dir_name in &managed_dirs {
+        let skill_md = store.join(dir_name).join("SKILL.md");
+        let Some(meta) = parse_frontmatter(&skill_md) else {
+            continue;
+        };
+
+        if meta.name == *dir_name || managed_dirs.contains(&meta.name) {
+            continue;
+        }
+
+        let Some(alias_state) = config.skills.remove(&meta.name) else {
+            continue;
+        };
+
+        let needs_update = config.skills.get(dir_name) != Some(&alias_state);
+        if needs_update {
+            config.skills.insert(dir_name.clone(), alias_state);
+        }
+
+        changed = true;
+    }
+
+    changed
 }
 
 /// Scan target directories for skills not yet in the central store.
@@ -228,18 +276,17 @@ pub fn find_unmanaged_skills(config: &Config) -> Vec<UnmanagedSkill> {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            let dir_name = path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let dir_name = path.file_name().unwrap().to_string_lossy().to_string();
 
             // Skip hidden dirs like .claude
             if dir_name.starts_with('.') {
                 continue;
             }
 
-            let is_symlink = path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false);
+            let is_symlink = path
+                .symlink_metadata()
+                .map(|m| m.is_symlink())
+                .unwrap_or(false);
 
             // If it's a symlink pointing to our central store, it's already managed
             if is_symlink {
@@ -340,10 +387,9 @@ pub fn import_skills(unmanaged: &[UnmanagedSkill], config: &mut Config) -> Vec<S
         }
 
         // Add to config as active (preserving current state)
-        config.skills.insert(
-            skill.name.clone(),
-            SkillState { active: true },
-        );
+        config
+            .skills
+            .insert(skill.name.clone(), SkillState { active: true });
 
         imported.push(skill.name.clone());
     }
@@ -353,7 +399,11 @@ pub fn import_skills(unmanaged: &[UnmanagedSkill], config: &mut Config) -> Vec<S
         for name in &imported {
             let target_path = target_dir.join(name);
             if target_path.exists() || target_path.symlink_metadata().is_ok() {
-                if target_path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+                if target_path
+                    .symlink_metadata()
+                    .map(|m| m.is_symlink())
+                    .unwrap_or(false)
+                {
                     let _ = fs::remove_file(&target_path);
                 } else {
                     let _ = fs::remove_dir_all(&target_path);
@@ -381,11 +431,19 @@ pub fn sync_symlinks(config: &Config) {
 
             let link_exists = link_path.symlink_metadata().is_ok();
 
-            let is_symlink = link_path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false);
-            let is_correct_symlink = is_symlink && fs::read_link(&link_path).ok().map_or(false, |target| {
-                let resolved = if target.is_absolute() { target } else { link_path.parent().unwrap().join(&target) };
-                resolved.starts_with(&store)
-            });
+            let is_symlink = link_path
+                .symlink_metadata()
+                .map(|m| m.is_symlink())
+                .unwrap_or(false);
+            let is_correct_symlink = is_symlink
+                && fs::read_link(&link_path).ok().map_or(false, |target| {
+                    let resolved = if target.is_absolute() {
+                        target
+                    } else {
+                        link_path.parent().unwrap().join(&target)
+                    };
+                    resolved.starts_with(&store)
+                });
 
             if state.active && store_path.exists() {
                 if is_correct_symlink {
@@ -422,7 +480,11 @@ pub fn delete_skill(name: &str, config: &mut Config) {
     for target_dir in config.expanded_target_dirs() {
         let link_path = target_dir.join(name);
         if link_path.symlink_metadata().is_ok() {
-            if link_path.symlink_metadata().map(|m| m.is_symlink()).unwrap_or(false) {
+            if link_path
+                .symlink_metadata()
+                .map(|m| m.is_symlink())
+                .unwrap_or(false)
+            {
                 let _ = fs::remove_file(&link_path);
             } else {
                 let _ = fs::remove_dir_all(&link_path);
@@ -454,4 +516,95 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::TargetsConfig;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEST_STORE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn make_temp_store() -> PathBuf {
+        let counter = TEST_STORE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let unique = format!(
+            "skill-manager-test-{}-{}-{}",
+            std::process::id(),
+            counter,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_skill(store: &Path, dir_name: &str, meta_name: &str) {
+        let skill_dir = store.join(dir_name);
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {}\ndescription: test\n---\n", meta_name),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn normalize_moves_alias_state_to_directory_key() {
+        let store = make_temp_store();
+        write_skill(&store, "gstack-review", "review");
+
+        let mut config = Config {
+            targets: TargetsConfig { dirs: vec![] },
+            skills: BTreeMap::from([
+                ("gstack-review".to_string(), SkillState { active: true }),
+                ("review".to_string(), SkillState { active: false }),
+            ]),
+        };
+
+        let changed = normalize_skill_state_keys_for_store(&mut config, &store);
+
+        assert!(changed);
+        assert_eq!(
+            config.skills.get("gstack-review"),
+            Some(&SkillState { active: false })
+        );
+        assert!(!config.skills.contains_key("review"));
+
+        let _ = fs::remove_dir_all(store);
+    }
+
+    #[test]
+    fn normalize_keeps_alias_when_it_is_a_real_skill_directory() {
+        let store = make_temp_store();
+        write_skill(&store, "gstack-review", "review");
+        write_skill(&store, "review", "review");
+
+        let mut config = Config {
+            targets: TargetsConfig { dirs: vec![] },
+            skills: BTreeMap::from([
+                ("gstack-review".to_string(), SkillState { active: true }),
+                ("review".to_string(), SkillState { active: false }),
+            ]),
+        };
+
+        let changed = normalize_skill_state_keys_for_store(&mut config, &store);
+
+        assert!(!changed);
+        assert_eq!(
+            config.skills.get("gstack-review"),
+            Some(&SkillState { active: true })
+        );
+        assert_eq!(
+            config.skills.get("review"),
+            Some(&SkillState { active: false })
+        );
+
+        let _ = fs::remove_dir_all(store);
+    }
 }

@@ -13,6 +13,7 @@ Modern AI coding agents use "skills" — markdown files (typically `SKILL.md`) t
 - `~/.agents/skills/`
 - `~/.config/amp/skills/`
 - `~/.cursor/skills/`
+- `~/.codex/skills/`
 - `~/.codeium/windsurf/skills/`
 
 Every installed skill is loaded into the system context as frontmatter on **every request**, consuming tokens whether the skill is relevant or not. With dozens of skills installed, this adds up fast — burning through context windows and increasing cost per interaction.
@@ -106,6 +107,7 @@ dirs = [
     "~/.agents/skills",
     "~/.config/amp/skills",
     "~/.cursor/skills",
+    "~/.codex/skills",
     "~/.codeium/windsurf/skills",
 ]
 
