@@ -214,25 +214,57 @@ pub fn normalize_skill_state_keys(config: &mut Config) -> bool {
     normalize_skill_state_keys_for_store(config, &Config::central_store())
 }
 
+/// Repair group memberships that were keyed by frontmatter name instead of store dir.
+pub fn normalize_group_skill_keys(config: &mut Config) -> bool {
+    normalize_group_skill_keys_for_store(config, &Config::central_store())
+}
+
 fn normalize_skill_state_keys_for_store(config: &mut Config, store: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(store) else {
-        return false;
-    };
-
-    let managed_dirs: std::collections::HashSet<String> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.is_dir() {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
+    let aliases = managed_skill_aliases(store);
     let mut changed = false;
+
+    for (alias, dir_name) in aliases {
+        let Some(alias_state) = config.skills.remove(&alias) else {
+            continue;
+        };
+
+        let needs_update = config.skills.get(&dir_name) != Some(&alias_state);
+        if needs_update {
+            config.skills.insert(dir_name, alias_state);
+        }
+
+        changed = true;
+    }
+
+    changed
+}
+
+fn normalize_group_skill_keys_for_store(config: &mut Config, store: &Path) -> bool {
+    let aliases = managed_skill_aliases(store);
+    let mut changed = false;
+
+    for members in config.groups.values_mut() {
+        for member in members.iter_mut() {
+            if let Some(canonical_key) = aliases.get(member) {
+                *member = canonical_key.clone();
+                changed = true;
+            }
+        }
+
+        let original_len = members.len();
+        let mut seen = std::collections::HashSet::new();
+        members.retain(|member| seen.insert(member.clone()));
+        if members.len() != original_len {
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn managed_skill_aliases(store: &Path) -> std::collections::HashMap<String, String> {
+    let managed_dirs = managed_skill_dirs(store);
+    let mut aliases = std::collections::HashMap::new();
 
     for dir_name in &managed_dirs {
         let skill_md = store.join(dir_name).join("SKILL.md");
@@ -244,19 +276,29 @@ fn normalize_skill_state_keys_for_store(config: &mut Config, store: &Path) -> bo
             continue;
         }
 
-        let Some(alias_state) = config.skills.remove(&meta.name) else {
-            continue;
-        };
-
-        let needs_update = config.skills.get(dir_name) != Some(&alias_state);
-        if needs_update {
-            config.skills.insert(dir_name.clone(), alias_state);
-        }
-
-        changed = true;
+        aliases.insert(meta.name, dir_name.clone());
     }
 
-    changed
+    aliases
+}
+
+fn managed_skill_dirs(store: &Path) -> std::collections::HashSet<String> {
+    let Ok(entries) = fs::read_dir(store) else {
+        return std::collections::HashSet::new();
+    };
+
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Scan target directories for skills not yet in the central store.
@@ -499,6 +541,9 @@ pub fn delete_skill(name: &str, config: &mut Config) {
 
     // Remove from config
     config.skills.remove(name);
+    for members in config.groups.values_mut() {
+        members.retain(|member| member != name);
+    }
     config.save();
 }
 
@@ -565,6 +610,7 @@ mod tests {
                 ("gstack-review".to_string(), SkillState { active: true }),
                 ("review".to_string(), SkillState { active: false }),
             ]),
+            groups: BTreeMap::new(),
         };
 
         let changed = normalize_skill_state_keys_for_store(&mut config, &store);
@@ -591,6 +637,7 @@ mod tests {
                 ("gstack-review".to_string(), SkillState { active: true }),
                 ("review".to_string(), SkillState { active: false }),
             ]),
+            groups: BTreeMap::new(),
         };
 
         let changed = normalize_skill_state_keys_for_store(&mut config, &store);
@@ -603,6 +650,57 @@ mod tests {
         assert_eq!(
             config.skills.get("review"),
             Some(&SkillState { active: false })
+        );
+
+        let _ = fs::remove_dir_all(store);
+    }
+
+    #[test]
+    fn normalize_groups_moves_alias_members_to_directory_key() {
+        let store = make_temp_store();
+        write_skill(&store, "gstack-review", "review");
+
+        let mut config = Config {
+            targets: TargetsConfig { dirs: vec![] },
+            skills: BTreeMap::new(),
+            groups: BTreeMap::from([(
+                "quality".to_string(),
+                vec!["review".to_string(), "gstack-review".to_string()],
+            )]),
+        };
+
+        let changed = normalize_group_skill_keys_for_store(&mut config, &store);
+
+        assert!(changed);
+        assert_eq!(
+            config.groups.get("quality"),
+            Some(&vec!["gstack-review".to_string()])
+        );
+
+        let _ = fs::remove_dir_all(store);
+    }
+
+    #[test]
+    fn normalize_groups_keeps_alias_when_it_is_a_real_skill_directory() {
+        let store = make_temp_store();
+        write_skill(&store, "gstack-review", "review");
+        write_skill(&store, "review", "review");
+
+        let mut config = Config {
+            targets: TargetsConfig { dirs: vec![] },
+            skills: BTreeMap::new(),
+            groups: BTreeMap::from([(
+                "quality".to_string(),
+                vec!["review".to_string(), "gstack-review".to_string()],
+            )]),
+        };
+
+        let changed = normalize_group_skill_keys_for_store(&mut config, &store);
+
+        assert!(!changed);
+        assert_eq!(
+            config.groups.get("quality"),
+            Some(&vec!["review".to_string(), "gstack-review".to_string()])
         );
 
         let _ = fs::remove_dir_all(store);

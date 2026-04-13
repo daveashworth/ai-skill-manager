@@ -14,13 +14,14 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use app::{App, ImportConfirm, Screen};
+use app::{App, Focus, ImportConfirm, Screen};
 use config::Config;
 
 fn main() -> io::Result<()> {
     // Load or create config
     let mut config = Config::load();
     skills::normalize_skill_state_keys(&mut config);
+    skills::normalize_group_skill_keys(&mut config);
     config.save(); // Ensure dirs exist
 
     // Ensure central store exists
@@ -61,7 +62,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                 match app.screen {
                     Screen::Import => handle_import_keys(app, key.code),
                     Screen::Main => {
-                        if app.delete_confirm.is_some() {
+                        if app.group_name_input.is_some() {
+                            handle_group_name_keys(app, key.code, key.modifiers);
+                        } else if app.group_editor.is_some() {
+                            handle_group_editor_keys(app, key.code);
+                        } else if app.delete_confirm.is_some() {
                             handle_delete_keys(app, key.code);
                         } else if app.searching {
                             handle_search_keys(app, key.code, key.modifiers);
@@ -109,14 +114,29 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
         KeyCode::Char('q') => {
             app.running = false;
         }
+        KeyCode::Tab => {
+            app.toggle_focus();
+        }
         KeyCode::Up | KeyCode::Char('k') => {
-            app.move_up();
+            if app.focus == Focus::Groups {
+                app.move_group_up();
+            } else {
+                app.move_skill_up();
+            }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            app.move_down();
+            if app.focus == Focus::Groups {
+                app.move_group_down();
+            } else {
+                app.move_skill_down();
+            }
         }
         KeyCode::Char(' ') | KeyCode::Enter => {
-            app.toggle_selected();
+            if app.focus == Focus::Groups {
+                app.toggle_selected_group();
+            } else {
+                app.toggle_selected_skill();
+            }
         }
         KeyCode::Char('/') => {
             app.start_search();
@@ -124,32 +144,37 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
         KeyCode::Esc => {
             if !app.search_query.is_empty() {
                 app.clear_search();
+            } else if app.focus == Focus::Groups {
+                app.focus_skills();
             }
         }
         KeyCode::Char('a') => {
-            // Activate all
-            for skill in &mut app.skills {
-                skill.active = true;
-                app.config
-                    .skills
-                    .insert(skill.key.clone(), config::SkillState { active: true });
+            app.activate_all();
+        }
+        KeyCode::Char('n') => {
+            if app.focus == Focus::Groups {
+                app.request_new_group();
             }
-            app.config.save();
-            skills::sync_symlinks(&app.config);
+        }
+        KeyCode::Char('e') => {
+            if app.focus == Focus::Groups {
+                app.request_edit_group();
+            }
+        }
+        KeyCode::Char('r') => {
+            if app.focus == Focus::Groups {
+                app.request_rename_group();
+            }
         }
         KeyCode::Char('x') => {
-            app.request_delete();
+            if app.focus == Focus::Groups {
+                app.request_delete_group();
+            } else {
+                app.request_delete_skill();
+            }
         }
         KeyCode::Char('d') => {
-            // Deactivate all
-            for skill in &mut app.skills {
-                skill.active = false;
-                app.config
-                    .skills
-                    .insert(skill.key.clone(), config::SkillState { active: false });
-            }
-            app.config.save();
-            skills::sync_symlinks(&app.config);
+            app.deactivate_all();
         }
         _ => {}
     }
@@ -159,6 +184,33 @@ fn handle_delete_keys(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Char('y') => app.confirm_delete(),
         KeyCode::Char('n') | KeyCode::Esc => app.cancel_delete(),
+        _ => {}
+    }
+}
+
+fn handle_group_name_keys(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
+    match key {
+        KeyCode::Enter => app.submit_group_name_input(),
+        KeyCode::Esc => app.cancel_group_name_input(),
+        KeyCode::Backspace => app.group_name_pop(),
+        KeyCode::Char(c) => {
+            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                app.cancel_group_name_input();
+            } else {
+                app.group_name_push(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_group_editor_keys(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Enter => app.save_group_editor(),
+        KeyCode::Esc => app.cancel_group_editor(),
+        KeyCode::Char(' ') => app.toggle_group_editor_member(),
+        KeyCode::Up | KeyCode::Char('k') => app.move_group_editor_up(),
+        KeyCode::Down | KeyCode::Char('j') => app.move_group_editor_down(),
         _ => {}
     }
 }
@@ -183,8 +235,8 @@ fn handle_search_keys(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                 app.search_push(c);
             }
         }
-        KeyCode::Up => app.move_up(),
-        KeyCode::Down => app.move_down(),
+        KeyCode::Up => app.move_skill_up(),
+        KeyCode::Down => app.move_skill_down(),
         _ => {}
     }
 }
