@@ -1,3 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -298,18 +301,31 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
                 format!(" {}", skill.meta.version)
             };
 
+            let groups = app.groups_for_skill(&skill.key);
+
             let key_style = if i == selected {
                 Style::default().fg(Color::Rgb(170, 170, 210))
             } else {
                 Style::default().fg(Color::DarkGray)
             };
 
+            let mut title_spans = vec![
+                Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
+                Span::styled(skill.meta.name.clone(), name_style),
+                Span::styled(version, Style::default().fg(Color::DarkGray)),
+            ];
+            for group in groups {
+                title_spans.push(Span::raw(" "));
+                title_spans.push(Span::styled(
+                    format!("[{}]", group),
+                    Style::default()
+                        .fg(color_for_group(group))
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+
             let lines = vec![
-                Line::from(vec![
-                    Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
-                    Span::styled(skill.meta.name.clone(), name_style),
-                    Span::styled(version, Style::default().fg(Color::DarkGray)),
-                ]),
+                Line::from(title_spans),
                 Line::from(vec![
                     Span::styled("   key: ", key_style),
                     Span::styled(skill.key.clone(), key_style),
@@ -926,6 +942,25 @@ fn draw_group_editor_dialog(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" Cancel", Style::default().fg(Color::Gray)),
     ]));
     f.render_widget(footer, chunks[2]);
+}
+
+fn color_for_group(group: &str) -> Color {
+    const PALETTE: [(u8, u8, u8); 8] = [
+        (84, 176, 142),
+        (102, 132, 220),
+        (211, 142, 92),
+        (171, 119, 214),
+        (78, 180, 201),
+        (201, 167, 76),
+        (204, 110, 147),
+        (133, 186, 96),
+    ];
+
+    let mut hasher = DefaultHasher::new();
+    group.hash(&mut hasher);
+    let index = (hasher.finish() as usize) % PALETTE.len();
+    let (r, g, b) = PALETTE[index];
+    Color::Rgb(r, g, b)
 }
 
 fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
