@@ -18,6 +18,8 @@ pub struct Config {
     pub targets: TargetsConfig,
     #[serde(default)]
     pub skills: BTreeMap<String, SkillState>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, Vec<String>>,
 }
 
 impl Config {
@@ -84,6 +86,7 @@ impl Default for Config {
                 ],
             },
             skills: BTreeMap::new(),
+            groups: BTreeMap::new(),
         }
     }
 }

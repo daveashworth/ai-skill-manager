@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, ImportConfirm, Screen};
+use crate::app::{App, DeleteTarget, Focus, GroupNameMode, GroupStatus, ImportConfirm, Screen};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     match app.screen {
@@ -161,6 +161,7 @@ fn draw_main(f: &mut Frame, app: &mut App) {
     // Title bar
     let total = app.skills.len();
     let active_count = app.skills.iter().filter(|s| s.active).count();
+    let group_count = app.config.groups.len();
     let title = Paragraph::new(Line::from(vec![
         Span::styled(
             " Skill Manager",
@@ -170,10 +171,11 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         ),
         Span::styled(
             format!(
-                "  {} skills ({} active, {} inactive)",
+                "  {} skills ({} active, {} inactive)  {} groups",
                 total,
                 active_count,
-                total - active_count
+                total - active_count,
+                group_count
             ),
             Style::default().fg(Color::DarkGray),
         ),
@@ -186,62 +188,21 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(outer[1]);
 
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+        .split(content[1]);
+
     draw_skill_list(f, app, content[0]);
-    draw_skill_detail(f, app, content[1]);
+    draw_detail(f, app, right[0]);
+    draw_group_list(f, app, right[1]);
 
-    // Delete confirmation overlay
-    if let Some(ref name) = app.delete_confirm {
-        let display_name = app
-            .selected_skill()
-            .map(|skill| skill.meta.name.as_str())
-            .unwrap_or(name.as_str());
-        let dialog = centered_rect(50, 20, area);
-        f.render_widget(ratatui::widgets::Clear, dialog);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(1)])
-            .split(dialog);
-
-        let text = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Delete ", Style::default().fg(Color::Red)),
-                Span::styled(
-                    display_name,
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("?", Style::default().fg(Color::Red)),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  This will remove it from the central store",
-                Style::default().fg(Color::Gray),
-            )),
-            Line::from(Span::styled(
-                "  and all target directories.",
-                Style::default().fg(Color::Gray),
-            )),
-        ])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red))
-                .title(" Confirm Delete "),
-        );
-        f.render_widget(text, chunks[0]);
-
-        let confirm = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "  [y]",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
-            Span::styled("[n/Esc]", Style::default().fg(Color::Yellow)),
-            Span::styled(" Cancel", Style::default().fg(Color::Gray)),
-        ]));
-        f.render_widget(confirm, chunks[1]);
+    if app.group_editor.is_some() {
+        draw_group_editor_dialog(f, app, area);
+    } else if app.group_name_input.is_some() {
+        draw_group_name_dialog(f, app, area);
+    } else if app.delete_confirm.is_some() {
+        draw_delete_dialog(f, app, area);
     }
 
     // Footer
@@ -259,17 +220,36 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         let mut spans = vec![
             Span::styled(" [Space]", Style::default().fg(Color::Yellow)),
             Span::styled(" Toggle  ", Style::default().fg(Color::Gray)),
+            Span::styled("[Tab]", Style::default().fg(Color::Yellow)),
+            Span::styled(" Focus  ", Style::default().fg(Color::Gray)),
             Span::styled("[/]", Style::default().fg(Color::Yellow)),
             Span::styled(" Search  ", Style::default().fg(Color::Gray)),
             Span::styled("[a]", Style::default().fg(Color::Yellow)),
             Span::styled(" Activate all  ", Style::default().fg(Color::Gray)),
             Span::styled("[d]", Style::default().fg(Color::Yellow)),
             Span::styled(" Deactivate all  ", Style::default().fg(Color::Gray)),
-            Span::styled("[x]", Style::default().fg(Color::Yellow)),
-            Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
             Span::styled("[q]", Style::default().fg(Color::Yellow)),
             Span::styled(" Quit", Style::default().fg(Color::Gray)),
         ];
+        if app.focus == Focus::Groups {
+            spans.push(Span::styled("  [n]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(" New  ", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled("[e]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(" Edit  ", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled("[r]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(" Rename  ", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled("[x]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(
+                " Delete group",
+                Style::default().fg(Color::Gray),
+            ));
+        } else {
+            spans.push(Span::styled("  [x]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(
+                " Delete skill",
+                Style::default().fg(Color::Gray),
+            ));
+        }
         if !app.search_query.is_empty() {
             spans.push(Span::styled("  [Esc]", Style::default().fg(Color::Yellow)));
             spans.push(Span::styled(
@@ -284,6 +264,11 @@ fn draw_main(f: &mut Frame, app: &mut App) {
 
 fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
     let selected = app.selected;
+    let border_style = if app.focus == Focus::Skills {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Rgb(60, 60, 80))
+    };
 
     let items: Vec<ListItem> = app
         .filtered_skills()
@@ -348,10 +333,18 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
     let list = List::new(items).highlight_symbol("").block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+            .border_style(border_style)
             .title(title),
     );
     f.render_stateful_widget(list, area, &mut app.list_state);
+}
+
+fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
+    if app.focus == Focus::Groups {
+        draw_group_detail(f, app, area);
+    } else {
+        draw_skill_detail(f, app, area);
+    }
 }
 
 fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
@@ -435,6 +428,16 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
     }
 
     lines.push(Line::from(""));
+
+    let groups = app.groups_for_skill(&skill.key);
+    if !groups.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Groups:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(groups.join(", "), Style::default().fg(Color::Cyan)),
+        ]));
+        lines.push(Line::from(""));
+    }
+
     lines.push(Line::from(vec![
         Span::styled("  Path:    ", Style::default().fg(Color::DarkGray)),
         Span::styled(
@@ -450,6 +453,479 @@ fn draw_skill_detail(f: &mut Frame, app: &App, area: Rect) {
             .title(" Details "),
     );
     f.render_widget(detail, area);
+}
+
+fn draw_group_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let border_style = if app.focus == Focus::Groups {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Rgb(60, 60, 80))
+    };
+
+    if app.config.groups.is_empty() {
+        let empty = Paragraph::new(vec![
+            Line::from(Span::styled(
+                "  No groups configured",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press [n] to create a group here.",
+                Style::default().fg(Color::Gray),
+            )),
+            Line::from(Span::styled(
+                "  Membership is stored with canonical skill keys.",
+                Style::default().fg(Color::Gray),
+            )),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title(" Groups "),
+        );
+        f.render_widget(empty, area);
+        return;
+    }
+
+    let selected = app.group_selected;
+    let items: Vec<ListItem> = app
+        .group_entries()
+        .iter()
+        .enumerate()
+        .map(|(i, (name, members))| {
+            let (marker, marker_color) = match app.group_status(name) {
+                GroupStatus::Active => ("●", Color::Green),
+                GroupStatus::Inactive => ("○", Color::DarkGray),
+                GroupStatus::Mixed => ("◐", Color::Yellow),
+                GroupStatus::Empty => ("◌", Color::DarkGray),
+            };
+            let (active_count, managed_count, configured_count) = app.group_counts(name);
+            let detail = if managed_count == configured_count {
+                format!("   {} active / {} skills", active_count, managed_count)
+            } else {
+                format!(
+                    "   {} active / {} managed / {} configured",
+                    active_count, managed_count, configured_count
+                )
+            };
+
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
+                    Span::styled(
+                        (*name).clone(),
+                        if i == selected {
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    detail,
+                    if i == selected {
+                        Style::default().fg(Color::Rgb(170, 170, 210))
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                )),
+                Line::from(Span::styled(
+                    format!("   keys: {}", members.join(", ")),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ];
+
+            if i == selected {
+                ListItem::new(lines).style(Style::default().bg(Color::Rgb(30, 30, 50)))
+            } else {
+                ListItem::new(lines)
+            }
+        })
+        .collect();
+
+    let list = List::new(items).highlight_symbol("").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style)
+            .title(" Groups "),
+    );
+    f.render_stateful_widget(list, area, &mut app.group_list_state);
+}
+
+fn draw_group_detail(f: &mut Frame, app: &App, area: Rect) {
+    let Some((group_name, member_keys)) = app.selected_group() else {
+        let empty = Paragraph::new("  No group selected")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title(" Group Details "),
+            );
+        f.render_widget(empty, area);
+        return;
+    };
+
+    let (status, status_color) = match app.group_status(group_name) {
+        GroupStatus::Active => ("Active", Color::Green),
+        GroupStatus::Inactive => ("Inactive", Color::DarkGray),
+        GroupStatus::Mixed => ("Mixed", Color::Yellow),
+        GroupStatus::Empty => ("Empty", Color::DarkGray),
+    };
+    let managed_members = app.group_member_skills(group_name);
+    let missing_count = member_keys.len().saturating_sub(managed_members.len());
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("  Status:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                status,
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Group:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                group_name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  Keys:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                member_keys.join(", "),
+                Style::default().fg(Color::Rgb(170, 170, 210)),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Managed members:",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    if managed_members.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  None of this group's keys match a managed skill yet.",
+            Style::default().fg(Color::Gray),
+        )));
+    } else {
+        for skill in managed_members {
+            let label = if skill.meta.name == skill.key {
+                skill.meta.name.clone()
+            } else {
+                format!("{} ({})", skill.meta.name, skill.key)
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  • {}", label),
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+
+    if missing_count > 0 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  {} configured key(s) are not currently managed.",
+                missing_count
+            ),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+
+    let detail = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Group Details "),
+    );
+    f.render_widget(detail, area);
+}
+
+fn draw_delete_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let Some(target) = &app.delete_confirm else {
+        return;
+    };
+
+    let dialog = centered_rect(50, 20, area);
+    f.render_widget(ratatui::widgets::Clear, dialog);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .split(dialog);
+
+    let (subject, details) = match target {
+        DeleteTarget::Skill(name) => {
+            let display_name = app
+                .skills
+                .iter()
+                .find(|skill| skill.key == *name)
+                .map(|skill| skill.meta.name.clone())
+                .unwrap_or_else(|| name.clone());
+
+            (
+                display_name,
+                vec![
+                    "  This will remove it from the central store".to_string(),
+                    "  and all target directories.".to_string(),
+                ],
+            )
+        }
+        DeleteTarget::Group(name) => (
+            name.clone(),
+            vec![
+                "  This only removes the group definition.".to_string(),
+                "  It will not delete or deactivate any skills.".to_string(),
+            ],
+        ),
+    };
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Delete ", Style::default().fg(Color::Red)),
+            Span::styled(
+                subject,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("?", Style::default().fg(Color::Red)),
+        ]),
+        Line::from(""),
+    ];
+
+    lines.extend(
+        details
+            .into_iter()
+            .map(|detail| Line::from(Span::styled(detail, Style::default().fg(Color::Gray)))),
+    );
+
+    let text = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(" Confirm Delete "),
+    );
+    f.render_widget(text, chunks[0]);
+
+    let confirm = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "  [y]",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" Delete  ", Style::default().fg(Color::Gray)),
+        Span::styled("[n/Esc]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Cancel", Style::default().fg(Color::Gray)),
+    ]));
+    f.render_widget(confirm, chunks[1]);
+}
+
+fn draw_group_name_dialog(f: &mut Frame, app: &App, area: Rect) {
+    let Some(dialog_state) = &app.group_name_input else {
+        return;
+    };
+
+    let dialog = centered_rect(50, 24, area);
+    f.render_widget(ratatui::widgets::Clear, dialog);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
+        .split(dialog);
+
+    let title = match dialog_state.mode {
+        GroupNameMode::Create => " Create Group ",
+        GroupNameMode::Rename { .. } => " Rename Group ",
+    };
+
+    let prompt = match dialog_state.mode {
+        GroupNameMode::Create => "  New group name:",
+        GroupNameMode::Rename { .. } => "  Group name:",
+    };
+
+    let header = Paragraph::new(prompt).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(title),
+    );
+    f.render_widget(header, chunks[0]);
+
+    let value = Paragraph::new(Line::from(vec![
+        Span::styled("  ", Style::default().fg(Color::White)),
+        Span::styled(&dialog_state.value, Style::default().fg(Color::White)),
+        Span::styled("█", Style::default().fg(Color::Yellow)),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 80))),
+    );
+    f.render_widget(value, chunks[1]);
+
+    let error = dialog_state.error.as_deref().unwrap_or("  ");
+    let error_style = if dialog_state.error.is_some() {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let error = Paragraph::new(error).style(error_style);
+    f.render_widget(error, chunks[2]);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("  [Enter]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Save  ", Style::default().fg(Color::Gray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Cancel", Style::default().fg(Color::Gray)),
+    ]));
+    f.render_widget(footer, chunks[3]);
+}
+
+fn draw_group_editor_dialog(f: &mut Frame, app: &mut App, area: Rect) {
+    let Some(editor) = &mut app.group_editor else {
+        return;
+    };
+
+    let dialog = centered_rect(78, 80, area);
+    f.render_widget(ratatui::widgets::Clear, dialog);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(1),
+        ])
+        .split(dialog);
+
+    let selected_count = editor.members.len();
+    let header = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("  Editing group: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                &editor.group_name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(Span::styled(
+            format!("  {} selected member(s)", selected_count),
+            Style::default().fg(Color::Gray),
+        )),
+    ])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Edit Group Members "),
+    );
+    f.render_widget(header, chunks[0]);
+
+    let items: Vec<ListItem> = if editor.entries.is_empty() {
+        vec![ListItem::new(vec![Line::from(Span::styled(
+            "  No managed skills found yet.",
+            Style::default().fg(Color::DarkGray),
+        ))])]
+    } else {
+        editor
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let member = editor.members.contains(&entry.key);
+                let checkbox = if member { "[x]" } else { "[ ]" };
+                let checkbox_style = if member {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                let name = if entry.missing {
+                    format!("{} (missing)", entry.name)
+                } else {
+                    entry.name.clone()
+                };
+                let status = if entry.missing {
+                    Style::default().fg(Color::Yellow)
+                } else if entry.active {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                let lines = vec![
+                    Line::from(vec![
+                        Span::styled(format!(" {} ", checkbox), checkbox_style),
+                        Span::styled(
+                            name,
+                            if i == editor.selected {
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(Color::White)
+                            },
+                        ),
+                        Span::styled(
+                            if entry.missing {
+                                " missing"
+                            } else if entry.active {
+                                " active"
+                            } else {
+                                " inactive"
+                            },
+                            status,
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        format!("   key: {}", entry.key),
+                        if i == editor.selected {
+                            Style::default().fg(Color::Rgb(170, 170, 210))
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    )),
+                ];
+
+                if i == editor.selected {
+                    ListItem::new(lines).style(Style::default().bg(Color::Rgb(30, 30, 50)))
+                } else {
+                    ListItem::new(lines)
+                }
+            })
+            .collect()
+    };
+
+    let list = List::new(items).highlight_symbol("").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+            .title(" Managed Skills "),
+    );
+    f.render_stateful_widget(list, chunks[1], &mut editor.list_state);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("  [Space]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Toggle member  ", Style::default().fg(Color::Gray)),
+        Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Save  ", Style::default().fg(Color::Gray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Cancel", Style::default().fg(Color::Gray)),
+    ]));
+    f.render_widget(footer, chunks[2]);
 }
 
 fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
