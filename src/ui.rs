@@ -204,6 +204,8 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         draw_group_editor_dialog(f, app, area);
     } else if app.group_name_input.is_some() {
         draw_group_name_dialog(f, app, area);
+    } else if app.skill_group_picker.is_some() {
+        draw_skill_group_picker_dialog(f, app, area);
     } else if app.delete_confirm.is_some() {
         draw_delete_dialog(f, app, area);
     }
@@ -237,6 +239,15 @@ fn draw_main(f: &mut Frame, app: &mut App) {
         if app.focus == Focus::Groups {
             spans.push(Span::styled("  [n]", Style::default().fg(Color::Yellow)));
             spans.push(Span::styled(" New  ", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled("[f]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(
+                if app.group_filter_enabled {
+                    " Unfilter skills  "
+                } else {
+                    " Filter skills  "
+                },
+                Style::default().fg(Color::Gray),
+            ));
             spans.push(Span::styled("[e]", Style::default().fg(Color::Yellow)));
             spans.push(Span::styled(" Edit  ", Style::default().fg(Color::Gray)));
             spans.push(Span::styled("[r]", Style::default().fg(Color::Yellow)));
@@ -247,6 +258,11 @@ fn draw_main(f: &mut Frame, app: &mut App) {
                 Style::default().fg(Color::Gray),
             ));
         } else {
+            spans.push(Span::styled("  [g]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(
+                " Add to group  ",
+                Style::default().fg(Color::Gray),
+            ));
             spans.push(Span::styled("  [x]", Style::default().fg(Color::Yellow)));
             spans.push(Span::styled(
                 " Delete skill",
@@ -340,10 +356,17 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    let title = if app.search_query.is_empty() {
+    let mut title_parts = Vec::new();
+    if let Some(group_name) = app.active_group_filter_name() {
+        title_parts.push(format!("group: {}", group_name));
+    }
+    if !app.search_query.is_empty() {
+        title_parts.push(format!("search: \"{}\"", app.search_query));
+    }
+    let title = if title_parts.is_empty() {
         " Skills ".to_string()
     } else {
-        format!(" Skills (filter: \"{}\") ", app.search_query)
+        format!(" Skills ({}) ", title_parts.join(", "))
     };
 
     let list = List::new(items).highlight_symbol("").block(
@@ -566,7 +589,11 @@ fn draw_group_list(f: &mut Frame, app: &mut App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
-            .title(" Groups "),
+            .title(if app.group_filter_enabled {
+                " Groups (filtering skills) "
+            } else {
+                " Groups "
+            }),
     );
     f.render_stateful_widget(list, area, &mut app.group_list_state);
 }
@@ -657,6 +684,20 @@ fn draw_group_detail(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Yellow),
         )));
     }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Press ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[f]", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            if app.group_filter_enabled {
+                " to stop filtering the Skills list by this group."
+            } else {
+                " to filter the Skills list by this group."
+            },
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
 
     let detail = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
         Block::default()
@@ -938,6 +979,115 @@ fn draw_group_editor_dialog(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" Toggle member  ", Style::default().fg(Color::Gray)),
         Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
         Span::styled(" Save  ", Style::default().fg(Color::Gray)),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Cancel", Style::default().fg(Color::Gray)),
+    ]));
+    f.render_widget(footer, chunks[2]);
+}
+
+fn draw_skill_group_picker_dialog(f: &mut Frame, app: &mut App, area: Rect) {
+    let Some(picker) = &mut app.skill_group_picker else {
+        return;
+    };
+
+    let dialog = centered_rect(60, 60, area);
+    f.render_widget(ratatui::widgets::Clear, dialog);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(1),
+        ])
+        .split(dialog);
+
+    let header = Paragraph::new(vec![Line::from(vec![
+        Span::styled(
+            "  Add skill to group: ",
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            &picker.skill_name,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" Add to Group "),
+    );
+    f.render_widget(header, chunks[0]);
+
+    let selected = picker.selected;
+    let skill_key = picker.skill_key.clone();
+    let items: Vec<ListItem> = app
+        .config
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(i, (name, members))| {
+            let already_member = members.iter().any(|member| member == &skill_key);
+            let marker = if already_member { "✓" } else { "+" };
+            let marker_color = if already_member {
+                Color::Green
+            } else {
+                Color::Yellow
+            };
+
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(format!(" {} ", marker), Style::default().fg(marker_color)),
+                    Span::styled(
+                        name.clone(),
+                        if i == selected {
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ),
+                    Span::styled(
+                        if already_member {
+                            " already a member"
+                        } else {
+                            ""
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    format!("   {} skill(s)", members.len()),
+                    if i == selected {
+                        Style::default().fg(Color::Rgb(170, 170, 210))
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    },
+                )),
+            ];
+
+            if i == selected {
+                ListItem::new(lines).style(Style::default().bg(Color::Rgb(30, 30, 50)))
+            } else {
+                ListItem::new(lines)
+            }
+        })
+        .collect();
+
+    let list = List::new(items).highlight_symbol("").block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(60, 60, 80)))
+            .title(" Groups "),
+    );
+    f.render_stateful_widget(list, chunks[1], &mut picker.list_state);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("  [Enter]", Style::default().fg(Color::Yellow)),
+        Span::styled(" Add  ", Style::default().fg(Color::Gray)),
         Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
         Span::styled(" Cancel", Style::default().fg(Color::Gray)),
     ]));

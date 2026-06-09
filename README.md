@@ -90,6 +90,8 @@ When a skill's friendly name and real managed key differ, the UI shows both so y
 | `Tab` | Switch focus between skills and groups |
 | `Space` / `Enter` | Toggle the selected skill or group |
 | `n` | Create a group when the Groups panel is focused |
+| `f` | Filter the Skills panel to the selected group when Groups is focused |
+| `g` | Add the selected skill to a group when Skills is focused |
 | `e` | Edit the selected group's members |
 | `r` | Rename the selected group |
 | `x` | Delete the focused skill or group |
@@ -161,6 +163,8 @@ The TUI includes a Groups panel. Press `Tab` to focus it, then use `j`/`k` or th
 You can also manage groups directly in the TUI:
 
 - Press `n` to create a group
+- Press `f` with a group selected to show only that group's skills in the Skills panel
+- Press `g` with a skill selected to add it to a group from a picker
 - Press `e` to edit the selected group's members
 - Press `r` to rename the selected group
 - Press `x` to delete the selected group

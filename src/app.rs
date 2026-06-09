@@ -67,6 +67,14 @@ pub struct GroupEditor {
     pub list_state: ListState,
 }
 
+#[derive(Debug, Clone)]
+pub struct SkillGroupPicker {
+    pub skill_key: String,
+    pub skill_name: String,
+    pub selected: usize,
+    pub list_state: ListState,
+}
+
 pub struct App {
     pub config: Config,
     pub skills: Vec<Skill>,
@@ -79,6 +87,7 @@ pub struct App {
     pub running: bool,
     pub screen: Screen,
     pub focus: Focus,
+    pub group_filter_enabled: bool,
 
     // Import state
     pub unmanaged: Vec<UnmanagedSkill>,
@@ -88,6 +97,7 @@ pub struct App {
     pub delete_confirm: Option<DeleteTarget>,
     pub group_name_input: Option<GroupNameDialog>,
     pub group_editor: Option<GroupEditor>,
+    pub skill_group_picker: Option<SkillGroupPicker>,
 }
 
 impl App {
@@ -107,11 +117,13 @@ impl App {
             running: true,
             screen: Screen::Main,
             focus: Focus::Skills,
+            group_filter_enabled: false,
             unmanaged: Vec::new(),
             import_confirm: ImportConfirm::Yes,
             delete_confirm: None,
             group_name_input: None,
             group_editor: None,
+            skill_group_picker: None,
         };
         app.sync_skill_selection();
         app.sync_group_selection();
@@ -140,19 +152,40 @@ impl App {
     }
 
     pub fn filtered_skills(&self) -> Vec<(usize, &Skill)> {
-        if self.search_query.is_empty() {
-            self.skills.iter().enumerate().collect()
+        let group_members = self.active_group_filter_members();
+        let q = if self.search_query.is_empty() {
+            None
         } else {
-            let q = self.search_query.to_lowercase();
-            self.skills
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| {
-                    s.meta.name.to_lowercase().contains(&q)
-                        || s.meta.description.to_lowercase().contains(&q)
-                })
-                .collect()
+            Some(self.search_query.to_lowercase())
+        };
+
+        self.skills
+            .iter()
+            .enumerate()
+            .filter(|(_, skill)| {
+                let matches_group = group_members
+                    .as_ref()
+                    .map(|members| members.iter().any(|member| member == &skill.key))
+                    .unwrap_or(true);
+                let matches_search = q
+                    .as_ref()
+                    .map(|query| {
+                        skill.meta.name.to_lowercase().contains(query)
+                            || skill.meta.description.to_lowercase().contains(query)
+                    })
+                    .unwrap_or(true);
+
+                matches_group && matches_search
+            })
+            .collect()
+    }
+
+    pub fn active_group_filter_name(&self) -> Option<&str> {
+        if !self.group_filter_enabled {
+            return None;
         }
+
+        self.selected_group().map(|(name, _)| name.as_str())
     }
 
     pub fn selected_skill(&self) -> Option<&Skill> {
@@ -234,6 +267,10 @@ impl App {
         if self.group_selected > 0 {
             self.group_selected -= 1;
             self.group_list_state.select(Some(self.group_selected));
+            if self.group_filter_enabled {
+                self.selected = 0;
+                self.sync_skill_selection();
+            }
         }
     }
 
@@ -242,6 +279,10 @@ impl App {
         if self.group_selected < max {
             self.group_selected = max.min(self.group_selected + 1);
             self.group_list_state.select(Some(self.group_selected));
+            if self.group_filter_enabled {
+                self.selected = 0;
+                self.sync_skill_selection();
+            }
         }
     }
 
@@ -299,6 +340,17 @@ impl App {
 
     pub fn focus_skills(&mut self) {
         self.focus = Focus::Skills;
+    }
+
+    pub fn toggle_group_filter(&mut self) {
+        if self.config.groups.is_empty() {
+            self.group_filter_enabled = false;
+            return;
+        }
+
+        self.group_filter_enabled = !self.group_filter_enabled;
+        self.selected = 0;
+        self.sync_skill_selection();
     }
 
     pub fn request_new_group(&mut self) {
@@ -456,6 +508,10 @@ impl App {
             *group_members = members;
             self.persist_groups();
             self.select_group_by_name(&editor.group_name);
+            if self.group_filter_enabled {
+                self.selected = 0;
+                self.sync_skill_selection();
+            }
         } else {
             self.sync_group_selection();
         }
@@ -507,6 +563,77 @@ impl App {
     pub fn request_delete_group(&mut self) {
         if let Some((group_name, _)) = self.selected_group() {
             self.delete_confirm = Some(DeleteTarget::Group(group_name.clone()));
+        }
+    }
+
+    pub fn request_add_skill_to_group(&mut self) {
+        let Some(skill) = self.selected_skill() else {
+            return;
+        };
+
+        if self.config.groups.is_empty() {
+            return;
+        }
+
+        let mut list_state = ListState::default();
+        let selected = 0;
+        list_state.select(Some(selected));
+
+        self.skill_group_picker = Some(SkillGroupPicker {
+            skill_key: skill.key.clone(),
+            skill_name: skill.meta.name.clone(),
+            selected,
+            list_state,
+        });
+        self.focus = Focus::Skills;
+    }
+
+    pub fn cancel_skill_group_picker(&mut self) {
+        self.skill_group_picker = None;
+    }
+
+    pub fn add_skill_to_picker_group(&mut self) {
+        let Some(picker) = self.skill_group_picker.take() else {
+            return;
+        };
+
+        let Some(group_name) = self.config.groups.keys().nth(picker.selected).cloned() else {
+            return;
+        };
+
+        if let Some(members) = self.config.groups.get_mut(&group_name) {
+            if !members.iter().any(|member| member == &picker.skill_key) {
+                members.push(picker.skill_key);
+                self.persist_groups();
+            }
+            self.select_group_by_name(&group_name);
+            if self.group_filter_enabled {
+                self.selected = 0;
+                self.sync_skill_selection();
+            }
+        }
+    }
+
+    pub fn move_skill_group_picker_up(&mut self) {
+        let Some(picker) = &mut self.skill_group_picker else {
+            return;
+        };
+
+        if picker.selected > 0 {
+            picker.selected -= 1;
+            picker.list_state.select(Some(picker.selected));
+        }
+    }
+
+    pub fn move_skill_group_picker_down(&mut self) {
+        let max = self.config.groups.len().saturating_sub(1);
+        let Some(picker) = &mut self.skill_group_picker else {
+            return;
+        };
+
+        if picker.selected < max {
+            picker.selected = max.min(picker.selected + 1);
+            picker.list_state.select(Some(picker.selected));
         }
     }
 
@@ -632,7 +759,11 @@ impl App {
                 }
                 DeleteTarget::Group(name) => {
                     self.config.groups.remove(&name);
+                    if self.config.groups.is_empty() {
+                        self.group_filter_enabled = false;
+                    }
                     self.persist_groups();
+                    self.sync_skill_selection();
                 }
             }
         }
@@ -640,5 +771,13 @@ impl App {
 
     pub fn cancel_delete(&mut self) {
         self.delete_confirm = None;
+    }
+
+    fn active_group_filter_members(&self) -> Option<&Vec<String>> {
+        if !self.group_filter_enabled {
+            return None;
+        }
+
+        self.selected_group().map(|(_, members)| members)
     }
 }

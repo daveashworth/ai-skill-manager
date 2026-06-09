@@ -66,6 +66,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                             handle_group_name_keys(app, key.code, key.modifiers);
                         } else if app.group_editor.is_some() {
                             handle_group_editor_keys(app, key.code);
+                        } else if app.skill_group_picker.is_some() {
+                            handle_skill_group_picker_keys(app, key.code);
                         } else if app.delete_confirm.is_some() {
                             handle_delete_keys(app, key.code);
                         } else if app.searching {
@@ -156,6 +158,16 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
                 app.request_new_group();
             }
         }
+        KeyCode::Char('g') => {
+            if app.focus == Focus::Skills {
+                app.request_add_skill_to_group();
+            }
+        }
+        KeyCode::Char('f') => {
+            if app.focus == Focus::Groups {
+                app.toggle_group_filter();
+            }
+        }
         KeyCode::Char('e') => {
             if app.focus == Focus::Groups {
                 app.request_edit_group();
@@ -211,6 +223,16 @@ fn handle_group_editor_keys(app: &mut App, key: KeyCode) {
         KeyCode::Char(' ') => app.toggle_group_editor_member(),
         KeyCode::Up | KeyCode::Char('k') => app.move_group_editor_up(),
         KeyCode::Down | KeyCode::Char('j') => app.move_group_editor_down(),
+        _ => {}
+    }
+}
+
+fn handle_skill_group_picker_keys(app: &mut App, key: KeyCode) {
+    match key {
+        KeyCode::Enter => app.add_skill_to_picker_group(),
+        KeyCode::Esc => app.cancel_skill_group_picker(),
+        KeyCode::Up | KeyCode::Char('k') => app.move_skill_group_picker_up(),
+        KeyCode::Down | KeyCode::Char('j') => app.move_skill_group_picker_down(),
         _ => {}
     }
 }
