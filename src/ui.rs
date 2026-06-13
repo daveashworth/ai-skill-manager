@@ -71,12 +71,7 @@ fn draw_import(f: &mut Frame, app: &mut App) {
             let desc = if s.meta.description.is_empty() {
                 String::new()
             } else {
-                let d = &s.meta.description;
-                let truncated = if d.len() > 60 {
-                    format!("{}…", &d[..60])
-                } else {
-                    d.clone()
-                };
+                let truncated = truncate_chars(&s.meta.description, 60);
                 format!("  {}", truncated)
             };
             ListItem::new(vec![
@@ -1139,6 +1134,17 @@ fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+
+    if chars.next().is_some() {
+        format!("{}…", truncated)
+    } else {
+        truncated
+    }
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
@@ -1157,4 +1163,24 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_chars;
+
+    #[test]
+    fn truncate_chars_does_not_split_multibyte_characters() {
+        let text = "Rethinks experiences for different platforms and contexts — not just resizing";
+
+        assert_eq!(
+            truncate_chars(text, 60),
+            "Rethinks experiences for different platforms and contexts — …"
+        );
+    }
+
+    #[test]
+    fn truncate_chars_leaves_short_text_unchanged() {
+        assert_eq!(truncate_chars("Short description", 60), "Short description");
+    }
 }
