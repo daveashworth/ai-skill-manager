@@ -88,6 +88,7 @@ pub struct App {
     pub screen: Screen,
     pub focus: Focus,
     pub group_filter_enabled: bool,
+    pub active_filter_enabled: bool,
 
     // Import state
     pub unmanaged: Vec<UnmanagedSkill>,
@@ -118,6 +119,7 @@ impl App {
             screen: Screen::Main,
             focus: Focus::Skills,
             group_filter_enabled: false,
+            active_filter_enabled: false,
             unmanaged: Vec::new(),
             import_confirm: ImportConfirm::Yes,
             delete_confirm: None,
@@ -174,8 +176,9 @@ impl App {
                             || skill.meta.description.to_lowercase().contains(query)
                     })
                     .unwrap_or(true);
+                let matches_active = !self.active_filter_enabled || skill.active;
 
-                matches_group && matches_search
+                matches_group && matches_search && matches_active
             })
             .collect()
     }
@@ -349,6 +352,12 @@ impl App {
         }
 
         self.group_filter_enabled = !self.group_filter_enabled;
+        self.selected = 0;
+        self.sync_skill_selection();
+    }
+
+    pub fn toggle_active_filter(&mut self) {
+        self.active_filter_enabled = !self.active_filter_enabled;
         self.selected = 0;
         self.sync_skill_selection();
     }
@@ -779,5 +788,100 @@ impl App {
         }
 
         self.selected_group().map(|(_, members)| members)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::config::TargetsConfig;
+    use crate::skills::SkillMeta;
+
+    fn skill(key: &str, name: &str, active: bool) -> Skill {
+        Skill {
+            key: key.to_string(),
+            meta: SkillMeta {
+                name: name.to_string(),
+                description: String::new(),
+                version: String::new(),
+                author: String::new(),
+            },
+            active,
+            store_path: PathBuf::from(key),
+        }
+    }
+
+    fn test_app(skills: Vec<Skill>) -> App {
+        App {
+            config: Config {
+                targets: TargetsConfig { dirs: Vec::new() },
+                skills: BTreeMap::new(),
+                groups: BTreeMap::new(),
+            },
+            skills,
+            selected: 0,
+            list_state: ListState::default(),
+            group_selected: 0,
+            group_list_state: ListState::default(),
+            search_query: String::new(),
+            searching: false,
+            running: true,
+            screen: Screen::Main,
+            focus: Focus::Skills,
+            group_filter_enabled: false,
+            active_filter_enabled: false,
+            unmanaged: Vec::new(),
+            import_confirm: ImportConfirm::Yes,
+            delete_confirm: None,
+            group_name_input: None,
+            group_editor: None,
+            skill_group_picker: None,
+        }
+    }
+
+    fn filtered_keys(app: &App) -> Vec<String> {
+        app.filtered_skills()
+            .iter()
+            .map(|(_, skill)| skill.key.clone())
+            .collect()
+    }
+
+    #[test]
+    fn active_filter_shows_only_active_skills() {
+        let mut app = test_app(vec![
+            skill("active-one", "Active one", true),
+            skill("inactive-one", "Inactive one", false),
+            skill("active-two", "Active two", true),
+        ]);
+
+        assert_eq!(
+            filtered_keys(&app),
+            vec!["active-one", "inactive-one", "active-two"]
+        );
+
+        app.toggle_active_filter();
+
+        assert_eq!(filtered_keys(&app), vec!["active-one", "active-two"]);
+    }
+
+    #[test]
+    fn active_filter_combines_with_group_filter_and_search() {
+        let mut app = test_app(vec![
+            skill("review", "Code review", true),
+            skill("frontend", "Frontend design", true),
+            skill("backend", "Backend design", false),
+        ]);
+        app.config.groups.insert(
+            "design".to_string(),
+            vec!["frontend".to_string(), "backend".to_string()],
+        );
+        app.group_filter_enabled = true;
+        app.active_filter_enabled = true;
+        app.search_query = "design".to_string();
+
+        assert_eq!(filtered_keys(&app), vec!["frontend"]);
     }
 }

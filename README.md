@@ -90,6 +90,7 @@ When a skill's friendly name and real managed key differ, the UI shows both so y
 | `Tab` | Switch focus between skills and groups |
 | `Space` / `Enter` | Toggle the selected skill or group |
 | `n` | Create a group when the Groups panel is focused |
+| `f` | Toggle the Skills panel between all skills and active skills when Skills is focused |
 | `f` | Filter the Skills panel to the selected group when Groups is focused |
 | `g` | Add the selected skill to a group when Skills is focused |
 | `e` | Edit the selected group's members |

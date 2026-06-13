@@ -253,6 +253,15 @@ fn draw_main(f: &mut Frame, app: &mut App) {
                 Style::default().fg(Color::Gray),
             ));
         } else {
+            spans.push(Span::styled("  [f]", Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(
+                if app.active_filter_enabled {
+                    " Show all  "
+                } else {
+                    " Active only  "
+                },
+                Style::default().fg(Color::Gray),
+            ));
             spans.push(Span::styled("  [g]", Style::default().fg(Color::Yellow)));
             spans.push(Span::styled(
                 " Add to group  ",
@@ -354,6 +363,9 @@ fn draw_skill_list(f: &mut Frame, app: &mut App, area: Rect) {
     let mut title_parts = Vec::new();
     if let Some(group_name) = app.active_group_filter_name() {
         title_parts.push(format!("group: {}", group_name));
+    }
+    if app.active_filter_enabled {
+        title_parts.push("active only".to_string());
     }
     if !app.search_query.is_empty() {
         title_parts.push(format!("search: \"{}\"", app.search_query));

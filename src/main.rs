@@ -166,6 +166,8 @@ fn handle_main_keys(app: &mut App, key: KeyCode) {
         KeyCode::Char('f') => {
             if app.focus == Focus::Groups {
                 app.toggle_group_filter();
+            } else {
+                app.toggle_active_filter();
             }
         }
         KeyCode::Char('e') => {
